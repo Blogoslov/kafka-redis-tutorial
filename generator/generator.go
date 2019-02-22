@@ -19,17 +19,20 @@ const topic = "Generated"
 
 func main() {
 
+	// инициализация генератора случайных чисел
 	rand.Seed(time.Now().Unix())
 	const max = 2345678901234
 
+	// клиент очереди
 	conn, err := kafka.DialLeader(context.Background(), "tcp", "localhost:9092", topic, 0)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer conn.Close()
 
-	for { // i := 10; i < 1000; i += 10 {
+	for {
 
+		// генерируем случайное число
 		n := rand.Intn(max)
 
 		err = conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
@@ -37,6 +40,7 @@ func main() {
 			log.Fatal(err)
 		}
 
+		// пишем чсило в очередь
 		_, err = conn.WriteMessages(
 			kafka.Message{Value: []byte(strconv.Itoa(n))},
 		)

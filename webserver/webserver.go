@@ -8,7 +8,7 @@ import (
 	"github.com/go-redis/redis"
 )
 
-var firstDB, secondDB *redis.Client
+var client *redis.Client
 
 type data struct {
 	Key string
@@ -17,18 +17,12 @@ type data struct {
 
 func main() {
 
-	firstDB = redis.NewClient(&redis.Options{
+	client = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "",
 		DB:       0,
 	})
-	defer firstDB.Close()
-	secondDB = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       1,
-	})
-	defer secondDB.Close()
+	defer client.Close()
 
 	http.HandleFunc("/solved", solvedHandler)
 	http.HandleFunc("/unsolved", unsolvedHandler)
@@ -43,14 +37,24 @@ func solvedHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Methods", "GET")
 	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
 
-	keys := firstDB.Keys("*")
+	// выбираем БД №0 - разложенные числа
+	cmd := redis.NewStringCmd("select", 0)
+	err := client.Process(cmd)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// получаем все ключи из БД
+	keys := client.Keys("*")
 
 	var solved []data
 	var item data
 
+	// для каждого ключа получаем значение и добавляем в массив
 	for _, key := range keys.Val() {
 		item.Key = key
-		val, err := firstDB.Get(key).Result()
+		val, err := client.Get(key).Result()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -60,7 +64,8 @@ func solvedHandler(w http.ResponseWriter, r *http.Request) {
 		solved = append(solved, item)
 	}
 
-	err := json.NewEncoder(w).Encode(solved)
+	// десериализуем массив в JSON
+	err = json.NewEncoder(w).Encode(solved)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -74,14 +79,21 @@ func unsolvedHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Methods", "GET")
 	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
 
-	keys := secondDB.Keys("*")
+	cmd := redis.NewStringCmd("select", 1)
+	err := client.Process(cmd)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	keys := client.Keys("*")
 
 	var solved []data
 	var item data
 
 	for _, key := range keys.Val() {
 		item.Key = key
-		val, err := secondDB.Get(key).Result()
+		val, err := client.Get(key).Result()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -91,7 +103,7 @@ func unsolvedHandler(w http.ResponseWriter, r *http.Request) {
 		solved = append(solved, item)
 	}
 
-	err := json.NewEncoder(w).Encode(solved)
+	err = json.NewEncoder(w).Encode(solved)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return

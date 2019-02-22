@@ -26,7 +26,7 @@ type data struct {
 	Factors []int
 }
 
-var dbSolved, dbUnsolved *redis.Client
+var client *redis.Client
 
 func main() {
 
@@ -40,29 +40,17 @@ func main() {
 		MaxBytes:  10e6, // 10MB
 	})
 
-	dbSolved = redis.NewClient(&redis.Options{
+	// клиент БД Redis
+	client = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
-	defer dbSolved.Close()
+	defer client.Close()
 
-	dbUnsolved = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       1,
-	})
-	defer dbUnsolved.Close()
-
-	_, err := dbSolved.Ping().Result()
+	_, err := client.Ping().Result()
 	if err != nil {
 		fmt.Println("1")
-		log.Fatal(err)
-	}
-
-	_, err = dbUnsolved.Ping().Result()
-	if err != nil {
-		fmt.Println("2")
 		log.Fatal(err)
 	}
 
@@ -71,8 +59,12 @@ func main() {
 
 	for {
 
+		// создайм объект контекста с таймаутом в 15 секунд для чтения сообщений
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
+
+		// читаем очередное сообщение из очереди
+		// поскольку вызов блокирующий - передаём контекст с таймаутом
 		m, err := r.ReadMessage(ctx)
 		if err != nil {
 			fmt.Println("3")
@@ -81,12 +73,16 @@ func main() {
 		}
 
 		wg.Add(1)
+		// создайм объект контекста с таймаутом в 10 миллисекунд для каждой вычислительной горутины
 		goCtx, goCcancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer goCcancel()
+
+		// вызываем функцию обработки сообщения (факторизации)
 		go process(goCtx, c, &wg, m)
 		c++
 	}
 
+	// ожидаем завершения всех горутин
 	wg.Wait()
 
 	err = r.Close()
@@ -177,12 +173,19 @@ func isPrime(n int) bool {
 }
 
 func storeSolved(item data) (err error) {
+	// переключаемся на БД 0
+	cmd := redis.NewStringCmd("select", 0)
+	err = client.Process(cmd)
 	b, err := json.Marshal(item.Factors)
-	err = dbSolved.Set(strconv.Itoa(item.Number), string(b), 0).Err()
+	err = client.Set(strconv.Itoa(item.Number), string(b), 0).Err()
 	return err
 }
 
 func storeUnsolved(n int) (err error) {
-	err = dbUnsolved.Set(strconv.Itoa(n), strconv.Itoa(n), 0).Err()
+	// переключаемся на БД 1
+	cmd := redis.NewStringCmd("select", 1)
+	err = client.Process(cmd)
+	err = client.Set(strconv.Itoa(n), strconv.Itoa(n), 0).Err()
 	return err
+
 }
